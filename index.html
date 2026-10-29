@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>音频分析工具 · 波形 / 拖动 / 倒放</title>
+    <!-- 引入 wavesurfer.js v7 -->
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #121417;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #c8ccd4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 16px;
+        }
+
+        .player-card {
+            background: #1c2027;
+            border-radius: 16px;
+            padding: 24px;
+            width: 100%;
+            max-width: 760px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid #2e343e;
+        }
+
+        /* 顶部状态栏 */
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            font-size: 12px;
+            color: #6b7280;
+            letter-spacing: 0.5px;
+        }
+
+        .card-header .left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 摩斯密码红点 */
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+            display: inline-block;
+            transition: opacity 0.1s;
+        }
+
+        .status-text { color: #9ca3af; }
+
+        /* 波形区域*/
+        .waveform-wrapper {
+            background: #15181e;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            border: 1px solid #2e343e;
+            padding: 16px;
+            position: relative;
+        }
+
+        #waveform {
+            width: 100%;
+            height: 120px; 
+            position: relative;
+        }
+
+        /* 进度条*/
+        .progress-section {
+            margin-bottom: 12px;
+            padding: 0 4px;
+        }
+
+        .progress-container {
+            width: 100%;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: #2e343e;
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        /* 进度条滑块 */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+            transition: transform 0.1s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        /* 显示时间 */
+        .time-display {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #6b7280;
+            margin-top: 4px;
+            font-family: monospace;
+        }
+
+        /* 控制栏 */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+            align-items: center;
+        }
+
+        .upload-btn {
+            background: #2a3648;
+            color: #e2e8f0;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .upload-btn:hover { background: #3b4b63; }
+        .upload-btn input[type="file"] { display: none; }
+
+        .play-btn-group { display: flex; gap: 8px; }
+
+        .icon-btn {
+            background: #2a3648;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 18px;
+            color: #e2e8f0;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover { background: #3b4b63; }
+        .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .speed-group {
+            display: flex;
+            gap: 4px;
+            background: #15181e;
+            padding: 4px;
+            border-radius: 8px;
+            margin-left: auto;
+        }
+
+        .speed-btn {
+            background: transparent;
+            border: none;
+            color: #9ca3af;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .speed-btn:hover { background: #2a3648; color: #e2e8f0; }
+        .speed-btn.active { background: #3b4b63; color: #ffffff; }
+
+        /* 底部信息 */
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #6b7280;
+            border-top: 1px solid #2e343e;
+            padding-top: 16px;
+        }
+
+        .info-row span { color: #9ca3af; }
+    </style>
+</head>
+<body>
+
+<div class="player-card">
+    <!-- 顶部红点与提示 -->
+    <div class="card-header">
+        <div class="left">
+            <span class="dot" id="morseDot"></span>
+            <span class="status-text">SRC-19 | 节点 #19</span>
+        </div>
+        <div>音频分析工具</div>
+    </div>
+
+    <!-- 波形显示框 -->
+    <div class="waveform-wrapper">
+        <div id="waveform"></div>
+    </div>
+
+    <!-- 进度条区域 -->
+    <div class="progress-section">
+        <div class="progress-container">
+            <input type="range" id="progressBar" min="0" max="100" value="0" step="0.1">
+        </div>
+        <div class="time-display">
+            <span id="currentTime">00:00</span>
+            <span id="totalTime">00:00</span>
+        </div>
+    </div>
+
+    <!-- 控制栏 -->
+    <div class="controls-row">
+        <label class="upload-btn">
+            + 插入音频
+            <input type="file" id="fileInput" accept="audio/*">
+        </label>
+
+        <div class="play-btn-group">
+            <button class="icon-btn" id="playBtn" disabled>▶ 播放</button>
+            <button class="icon-btn" id="pauseBtn" disabled>⏸ 暂停</button>
+        </div>
+
+        <button class="icon-btn" id="reverseBtn" disabled>↺ 倒放</button>
+
+        <div class="speed-group" id="speedGroup">
+            <button class="speed-btn" data-speed="0.5">0.5x</button>
+            <button class="speed-btn active" data-speed="1">1x</button>
+            <button class="speed-btn" data-speed="1.5">1.5x</button>
+            <button class="speed-btn" data-speed="2">2x</button>
+        </div>
+    </div>
+
+    <!-- 底部信息 -->
+    <div class="info-row">
+        <span id="infoSampleRate">采样率: --</span>
+        <span id="infoDuration">时长: --</span>
+        <span id="infoChannels">频道: --</span>
+    </div>
+</div>
+
+<script>
+
+    // 1. 闪烁逻辑 ("we are watching you")
+
+    const morseDot = document.getElementById('morseDot');
+    const morseString = "... . / .- .-. . / .-- .- - -.-. .... .. -. --. / -.-- --- ..-";
+    let morseIndex = 0;
+
+    function blinkMorse() {
+        const char = morseString[morseIndex];
+        let duration = 200;
+        if (char === '.') {
+            morseDot.style.opacity = '1';
+            duration = 200;
+        } else if (char === '-') {
+            morseDot.style.opacity = '1';
+            duration = 600;
+        } else {
+            morseDot.style.opacity = '0.2';
+            duration = 400;
+        }
+        morseIndex = (morseIndex + 1) % morseString.length;
+        setTimeout(() => {
+            morseDot.style.opacity = '0.2';
+            setTimeout(blinkMorse, 200);
+        }, duration);
+    }
+    blinkMorse();
+
+
+    // 2. 音频处理
+  
+    const fileInput = document.getElementById('fileInput');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const reverseBtn = document.getElementById('reverseBtn');
+    const speedBtns = document.querySelectorAll('.speed-btn');
+    
+    // 进度条
+    const progressBar = document.getElementById('progressBar');
+    const currentTimeEl = document.getElementById('currentTime');
+    const totalTimeEl = document.getElementById('totalTime');
+
+    // 信息显示
+    const infoSampleRate = document.getElementById('infoSampleRate');
+    const infoDuration = document.getElementById('infoDuration');
+    const infoChannels = document.getElementById('infoChannels');
+
+    let waveSurfer = null;
+    let audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    let originalBuffer = null;
+    let currentSpeed = 1;
+    let isReversed = false;
+    let isSeeking = false; 
+
+    // 初始化 Wavesurfer 
+    function initWaveSurfer() {
+        if (waveSurfer) waveSurfer.destroy();
+        
+        waveSurfer = WaveSurfer.create({
+            container: '#waveform',
+            waveColor: '#4b5563',
+            progressColor: '#3b82f6',
+            cursorColor: 'transparent', 
+            barWidth: 2,
+            barRadius: 2,
+            height: 120, 
+            normalize: true,
+            hideScrollbar: true,
+        });
+
+        // 监听播放状态变化
+        waveSurfer.on('play', () => {
+            playBtn.disabled = true;
+            pauseBtn.disabled = false;
+        });
+        waveSurfer.on('pause', () => {
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+        });
+        waveSurfer.on('finish', () => {
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+            progressBar.value = 100;
+        });
+
+        // 监听播放进度更新
+        waveSurfer.on('timeupdate', (currentTime) => {
+            if (isSeeking) return; 
+            const duration = waveSurfer.getDuration();
+            if (duration > 0) {
+                const percent = (currentTime / duration) * 100;
+                progressBar.value = percent;
+                currentTimeEl.textContent = formatTime(currentTime);
+            }
+        });
+
+        // 监听 seek 完成
+        waveSurfer.on('seek', () => {
+        });
+    }
+
+    // 格式化时间 (00:00)
+    function formatTime(seconds) {
+        if (isNaN(seconds)) return '00:00';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // 加载音频
+    async function loadAudio(file) {
+        try {
+            // 1. 初始化实例
+            initWaveSurfer();
+
+            // 2. 唤醒 AudioContext
+            if (audioContext.state === 'suspended') await audioContext.resume();
+
+            // 3. 读取并解码用于获取信息
+            const arrayBuffer = await file.arrayBuffer();
+            originalBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+
+            // 4. 更新底部信息
+            infoSampleRate.textContent = `采样率: ${originalBuffer.sampleRate} Hz`;
+            infoDuration.textContent = `时长: ${originalBuffer.duration.toFixed(2)} s`;
+            infoChannels.textContent = `频道: ${originalBuffer.numberOfChannels}`;
+
+            // 5. 渲染
+            const blob = new Blob([arrayBuffer], { type: file.type });
+            const url = URL.createObjectURL(blob);
+            
+            await waveSurfer.load(url);
+
+            // 6. 更新 UI
+            const duration = waveSurfer.getDuration();
+            totalTimeEl.textContent = formatTime(duration);
+            progressBar.value = 0;
+            currentTimeEl.textContent = '00:00';
+            
+            // 恢复状态
+            isReversed = false;
+            reverseBtn.textContent = '↺ 倒放';
+            reverseBtn.style.background = '';
+            playBtn.disabled = false;
+            reverseBtn.disabled = false;
+            waveSurfer.setPlaybackRate(currentSpeed);
+
+        } catch (error) {
+            console.error("加载错误:", error);
+            alert("无法加载音频，请检查文件格式或重试。");
+        }
+    }
+
+    // 3. 倒放
+
+    function cloneAndReverseBuffer(buffer) {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const reversed = ctx.createBuffer(
+            buffer.numberOfChannels,
+            buffer.length,
+            buffer.sampleRate
+        );
+
+        for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+            const originalData = buffer.getChannelData(ch);
+            const reversedData = new Float32Array(originalData); 
+            reversedData.reverse(); 
+            reversed.copyToChannel(reversedData, ch);
+        }
+        return reversed;
+    }
+
+    async function toggleReverse() {
+        if (!originalBuffer || !waveSurfer) return;
+
+        try {
+            const wasPlaying = waveSurfer.isPlaying();
+            const currentTime = waveSurfer.getCurrentTime();
+            const totalDuration = waveSurfer.getDuration();
+
+            let bufferToPlay;
+
+            if (!isReversed) {
+                bufferToPlay = cloneAndReverseBuffer(originalBuffer);
+                isReversed = true;
+                reverseBtn.textContent = '↺ 正放';
+                reverseBtn.style.background = '#3b4b63';
+            } else {
+                bufferToPlay = originalBuffer;
+                isReversed = false;
+                reverseBtn.textContent = '↺ 倒放';
+                reverseBtn.style.background = '';
+            }
+
+            // 将 AudioBuffer 转为 WAV Blob 加载
+            const wavBlob = audioBufferToWav(bufferToPlay);
+            const url = URL.createObjectURL(wavBlob);
+            
+            await waveSurfer.load(url);
+
+            // 恢复进度和状态
+            let seekProgress = currentTime / totalDuration;
+            if (isReversed) seekProgress = 1 - seekProgress; 
+            seekProgress = Math.max(0, Math.min(1, seekProgress));
+
+            // 渲染
+            setTimeout(async () => {
+                const targetTime = seekProgress * waveSurfer.getDuration();
+                waveSurfer.setTime(targetTime);
+                progressBar.value = seekProgress * 100;
+                currentTimeEl.textContent = formatTime(targetTime);
+                
+                waveSurfer.setPlaybackRate(currentSpeed);
+                if (wasPlaying) waveSurfer.play();
+            }, 50);
+
+        } catch (error) {
+            console.error("倒放操作失败:", error);
+            alert("倒放处理出错，请刷新页面重试。");
+        }
+    }
+
+    // 4. 事件监听
+
+    // 文件选择
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) loadAudio(file);
+    });
+
+    // 播放与暂停
+    playBtn.addEventListener('click', async () => {
+        if (audioContext.state === 'suspended') await audioContext.resume();
+        if (waveSurfer) waveSurfer.play();
+    });
+    pauseBtn.addEventListener('click', () => {
+        if (waveSurfer) waveSurfer.pause();
+    });
+
+    // 倒放按钮
+    reverseBtn.addEventListener('click', async () => {
+        if (audioContext.state === 'suspended') await audioContext.resume();
+        await toggleReverse();
+    });
+
+    // 倍速按钮
+    speedBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const speed = parseFloat(btn.dataset.speed);
+            currentSpeed = speed;
+            speedBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            if (waveSurfer) waveSurfer.setPlaybackRate(speed);
+        });
+    });
+
+    //进度条拖动
+    
+    // 1. 按下滑块
+    progressBar.addEventListener('mousedown', () => {
+        isSeeking = true;
+    });
+
+    // 2. 松开滑块/触摸结束
+    progressBar.addEventListener('mouseup', () => {
+        isSeeking = false;
+    });
+    
+    // 移动端触摸
+    progressBar.addEventListener('touchstart', () => {
+        isSeeking = true;
+    });
+    progressBar.addEventListener('touchend', () => {
+        isSeeking = false;
+    });
+
+    // 3. 实时更新显示
+    progressBar.addEventListener('input', (e) => {
+        if (!waveSurfer || !waveSurfer.getDuration()) return;
+        const percent = parseFloat(e.target.value);
+        const duration = waveSurfer.getDuration();
+        const targetTime = (percent / 100) * duration;
+        
+        // 实时更新文字
+        currentTimeEl.textContent = formatTime(targetTime);
+    });
+
+    // 4. 拖动结束
+    progressBar.addEventListener('change', (e) => {
+        if (!waveSurfer || !waveSurfer.getDuration()) return;
+        const percent = parseFloat(e.target.value);
+        const duration = waveSurfer.getDuration();
+        const targetTime = (percent / 100) * duration;
+        
+        waveSurfer.setTime(targetTime);
+    });
+
+
+
+    // 5. 辅助工具：AudioBuffer 转 WAV
+
+    function audioBufferToWav(buffer) {
+        const numChannels = buffer.numberOfChannels;
+        const sampleRate = buffer.sampleRate;
+        const format = 1;
+        const bitDepth = 16;
+
+        let result;
+        if (numChannels === 2) {
+            result = interleave(buffer.getChannelData(0), buffer.getChannelData(1));
+        } else {
+            result = buffer.getChannelData(0);
+        }
+        return new Blob([encodeWAV(result, format, sampleRate, numChannels, bitDepth)], { type: 'audio/wav' });
+    }
+
+    function interleave(inputL, inputR) {
+        const length = inputL.length + inputR.length;
+        const result = new Float32Array(length);
+        let index = 0, inputIndex = 0;
+        while (index < length) {
+            result[index++] = inputL[inputIndex];
+            result[index++] = inputR[inputIndex];
+            inputIndex++;
+        }
+        return result;
+    }
+
+    function encodeWAV(samples, format, sampleRate, numChannels, bitDepth) {
+        const bytesPerSample = bitDepth / 8;
+        const blockAlign = numChannels * bytesPerSample;
+        const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+        const view = new DataView(buffer);
+
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + samples.length * bytesPerSample, true);
+        writeString(view, 8, 'WAVE');
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, format, true);
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * blockAlign, true);
+        view.setUint16(32, blockAlign, true);
+        view.setUint16(34, bitDepth, true);
+        writeString(view, 36, 'data');
+        view.setUint32(40, samples.length * bytesPerSample, true);
+
+        if (format === 1) {
+            floatTo16BitPCM(view, 44, samples);
+        }
+        return buffer;
+    }
+
+    function floatTo16BitPCM(output, offset, input) {
+        for (let i = 0; i < input.length; i++, offset += 2) {
+            const s = Math.max(-1, Math.min(1, input[i]));
+            output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+    }
+
+    function writeString(view, offset, string) {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    }
+</script>
+</body>
+</html>
